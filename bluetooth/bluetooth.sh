@@ -182,16 +182,25 @@ echo -e "${BOLD}5. Bluetooth firmware status${NC}"
 BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
 if [ -f "$BT_FW" ]; then
     ok "BCM4350C0.hcd already installed: $BT_FW"
-    if [ -L "/lib/firmware/brcm/BCM2E7C.hcd" ]; then
-        ok "BCM2E7C.hcd symlink present (older kernel compat)"
-    else
-        fix "Adding BCM2E7C.hcd compatibility symlink"
-        ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd
-        ok "Symlink created"
-    fi
+    # brcm/BCM.hcd is the only name btbcm requests on this chip (subver 0x6186 is
+    # absent from bcm_uart_subver_table, so hw_name is NULL). Without this link
+    # the file above is never read.
+    for link in BCM.hcd BCM2E7C.hcd; do
+        lpath="/lib/firmware/brcm/$link"
+        if [ -L "$lpath" ]; then
+            ok "$link link present"
+        elif [ -e "$lpath" ]; then
+            warn "$lpath is a regular file — leaving it alone"
+        else
+            fix "Adding $link link → BCM4350C0.hcd"
+            ln -sf BCM4350C0.hcd "$lpath"
+            ok "Link created: $lpath"
+        fi
+    done
 else
-    warn "BCM4350C0.hcd NOT installed — A2DP audio will be choppy without it"
-    info "Fix: sudo bash macbook_hardware_fixer.sh  (step 2 installs the firmware)"
+    warn "BCM4350C0.hcd NOT installed"
+    info "Effect on A2DP quality is unverified — see firmware/README.md"
+    info "Install: sudo bash macbook_hardware_fixer.sh  (step 2 installs the firmware)"
 fi
 echo ""
 

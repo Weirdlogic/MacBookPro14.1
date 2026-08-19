@@ -19,7 +19,12 @@ Usage:
 
 Output: BCM4350C0.hcd  (~86 kB)
   Install at: /lib/firmware/brcm/BCM4350C0.hcd
-  Symlink:    /lib/firmware/brcm/BCM2E7C.hcd -> BCM4350C0.hcd  (older kernel compat)
+  Symlink:    /lib/firmware/brcm/BCM.hcd    -> BCM4350C0.hcd  (REQUIRED — see below)
+  Symlink:    /lib/firmware/brcm/BCM2E7C.hcd -> BCM4350C0.hcd  (descriptive only)
+
+  BCM.hcd is not a fallback: this chip reports subver 0x6186, which has no entry
+  in bcm_uart_subver_table, so btbcm_initialize() leaves hw_name NULL and asks
+  for brcm/BCM.hcd and nothing else. Without that link nothing is ever loaded.
 
 Hardware:
   MacBook Pro 13" 2017 (MacBookPro14,1)
@@ -158,9 +163,10 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
     print(f"  MiniDriver : 0x{mini_segs[0][0]:08X}  ({sum(len(d) for _,d in mini_segs):,} bytes)")
     print(f"  Firmware   : 0x{upd_segs[0][0]:08X}  ({sum(len(d) for _,d in upd_segs):,} bytes)")
     print()
-    print(f"Install on Ubuntu:")
+    print(f"Install:")
     print(f"  sudo cp {output_hcd} /lib/firmware/brcm/BCM4350C0.hcd")
-    print(f"  sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd")
+    print(f"  sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd     # required")
+    print(f"  sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd # descriptive")
     print(f"  sudo rmmod hci_uart && sudo modprobe hci_uart")
 
 

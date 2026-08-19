@@ -15,7 +15,7 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 | Audio (microphone) | Cirrus CS8409 | ✅ Works | PipeWire filter-chain DSP (noise gate + autogain) — `macbook_hardware_fixer.sh` step 0 |
 | Intel GPU | Iris Plus 640 (Kaby Lake GT3) | ✅ Works + VA-API | `macbook_hardware_fixer.sh` step 1 |
 | WiFi | Broadcom BCM4350 | ✅ Works | `macbook_hardware_fixer.sh` step 3 |
-| Bluetooth | Broadcom BCM4350C0 (UART) | ⚠️ SMC Reset needed once + firmware for A2DP | `macbook_hardware_fixer.sh` step 2 · `bluetooth/bluetooth.sh` |
+| Bluetooth | Broadcom BCM4350C0 (UART) | ⚠️ SMC Reset needed once; firmware patch optional | `macbook_hardware_fixer.sh` step 2 · `bluetooth/bluetooth.sh` |
 | FaceTime HD Camera | Broadcom 720p PCIe 14e4:1570 | ⚠️ Needs driver | `macbook_hardware_fixer.sh` step 4 |
 | Thunderbolt 3 | Intel Alpine Ridge 4C (JHL6540) | ✅ Works | `macbook_hardware_fixer.sh` step 5 |
 | Battery & Thermal | Intel i5-7360U + applesmc | ✅ Works | `macbook_hardware_fixer.sh` step 6 |
@@ -39,8 +39,9 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
   without hardware amplification). Fixed automatically by the PipeWire filter-chain DSP
   installed by `macbook_hardware_fixer.sh` step 0 — the virtual source "MacBook Pro Mic (DSP)"
   applies noise gate + auto-gain and is set as default capture device.
-- **Bluetooth A2DP audio**: choppy without BCM4350C0 firmware (see Bluetooth section below).
-  Basic scan and pairing work without firmware.
+- **Bluetooth A2DP audio**: choppy A2DP is usually the baud rate, fixed by the one-time
+  SMC Reset (see Bluetooth section below). Basic scan and pairing work without firmware,
+  and the firmware patch has no measured effect on A2DP — see `firmware/README.md`.
 - **Suspend/resume**: works with s2idle + NVMe d3cold fix (both applied by
   `macbook_hardware_fixer.sh` step 9). Even so, resume may be slow in some cases.
 - **Auto-boot on lid open**: the MacBook Pro 2016/2017 powers on automatically when the
@@ -82,7 +83,7 @@ Thunderbolt, Battery, Fan, Keyboard backlight, Touchpad, Suspend,
 sudo ./macbook_hardware_fixer.sh
 ```
 
-**Step 4 — Fix Bluetooth firmware** (required for A2DP audio; basic scan/pair works without it):
+**Step 4 — Install the Bluetooth firmware patch** (optional; basic scan/pair works without it):
 
 The Broadcom **BCM4350C0** UART Bluetooth chip needs firmware not in `linux-firmware`.
 See the [Bluetooth section](#2-bluetooth--bcm4350c0) below for full details.
@@ -90,7 +91,8 @@ See the [Bluetooth section](#2-bluetooth--bcm4350c0) below for full details.
 ```bash
 # Option A: copy from macOS (dual-boot or USB installer)
 sudo cp /path/to/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd  # descriptive only
 sudo rmmod hci_uart && sudo modprobe hci_uart
 
 # Option B: community-extracted firmware
@@ -146,7 +148,9 @@ vainfo   # should list VAProfileH264*, VAProfileHEVC* entries
 
 The chip self-identifies as `BCM4350C0` (macOS marketing name: BCM2E7C). It is a **UART
 chip** (not USB) — connected via serial0/ttyS4. The chip works from internal ROM; external
-firmware is optional (improves A2DP audio quality but is not required for basic BT).
+firmware is optional. Its effect on A2DP quality is unverified — see `firmware/README.md`
+for the measurements. Note that a mainline kernel requests **`/lib/firmware/brcm/BCM.hcd`**
+and no other name on this machine, so installing `BCM4350C0.hcd` alone loads nothing.
 
 #### SMC Reset — required ONCE after migrating from macOS
 
@@ -173,13 +177,14 @@ After SMC Reset the chip resets to factory baud rate and `hci0` will appear.
 - Creates `/etc/udev/rules.d/60-bluetooth-macbook.rules` to bring `hci0` up automatically
 - WirePlumber: disables A2DP → HFP/HSP auto-switch (prevents AirPods Pro dropouts)
 
-**Firmware (optional — improves A2DP; linux-firmware does NOT have it):**
+**Firmware (optional — effect unverified; linux-firmware does NOT have it):**
 
 ```bash
 # Option A: from running macOS (dual-boot) or macOS USB installer
 ls /usr/share/firmware/bluetooth/     # find BCM4350C0.hcd
 sudo cp /path/to/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # older kernel compat
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # descriptive only
 
 # Option B: community-extracted firmware (search GitHub for 'BCM4350C0.hcd')
 

@@ -137,17 +137,27 @@ step "2/11 — Bluetooth BCM4350C0 UART"
 
 BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
 BT_FW_OLD="/lib/firmware/brcm/BCM2E7C.hcd"
+# The name that actually matters: this chip reports subver 0x6186, which is not in
+# bcm_uart_subver_table, so btbcm_initialize() requests brcm/BCM.hcd and nothing
+# else. BCM4350C0.hcd on its own is never read by a mainline kernel.
+BT_FW_KERNEL="/lib/firmware/brcm/BCM.hcd"
 if [ -f "$BT_FW" ]; then
     pass "Bluetooth firmware present: BCM4350C0.hcd"
-    if [ -L "$BT_FW_OLD" ]; then
-        pass "Compatibility symlink BCM2E7C.hcd → BCM4350C0.hcd present"
+    if [ -e "$BT_FW_KERNEL" ]; then
+        pass "brcm/BCM.hcd present — this is the name the kernel actually requests"
     else
-        warn "Compatibility symlink BCM2E7C.hcd missing (older kernels may not find firmware)"
-        info "Fix: sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd"
+        fail "brcm/BCM.hcd MISSING — the kernel requests this name and no other"
+        info "BCM4350C0.hcd alone is never loaded on a mainline kernel."
+        info "Fix: sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd"
+    fi
+    if [ -e "$BT_FW_OLD" ]; then
+        pass "Compatibility link BCM2E7C.hcd → BCM4350C0.hcd present"
+    else
+        info "Compatibility link BCM2E7C.hcd absent (descriptive only — not requested by the kernel)"
     fi
 else
     fail "Bluetooth firmware MISSING: /lib/firmware/brcm/BCM4350C0.hcd"
-    info "Without firmware: BT works for scan/pair but A2DP audio will be choppy"
+    info "Effect on A2DP quality is not established — see firmware/README.md"
     info "See README step 5 or run macbook_hardware_fixer.sh step 2 with macOS partition"
 fi
 
@@ -187,20 +197,22 @@ else
 fi
 
 # Check if firmware was actually loaded (or errored at boot).
-# "firmware Patch file not found" in kernel 7.x is emitted by btbcm even when the
-# main BCM4350C0.hcd was loaded successfully — it refers to an optional secondary
-# patch file. If hci0 is UP with a valid BD address, BT is functional despite the
-# message. Treat it as a warning, not a failure, when BT is actually working.
+# "firmware Patch file not found, tried: brcm/BCM.hcd" means exactly what it says:
+# btbcm found no patch file and applied NO patch. It is not a secondary or optional
+# file and it is not cosmetic. hci0 can still come up and pair without any patch,
+# so a working hci0 does not contradict the message — it just means the unpatched
+# chip is usable.
 BT_JOURNAL=$(journalctl -b 0 -k --no-pager 2>/dev/null | grep -i "hci0.*BCM\|BCM.*hci0" | tail -5)
 _HCI_WORKING=false
 _HCI_ADDR_NOW=$(hciconfig hci0 2>/dev/null | grep "BD Address" | awk '{print $3}')
 [ -n "$_HCI_ADDR_NOW" ] && [ "$_HCI_ADDR_NOW" != "00:00:00:00:00:00" ] && _HCI_WORKING=true
 if echo "$BT_JOURNAL" | grep -q "firmware Patch file not found"; then
     if $_HCI_WORKING; then
-        info "Kernel: optional BT secondary patch not found (cosmetic in kernel 7.x — BCM4350C0.hcd loaded, chip operational)"
+        warn "Kernel found no patch file (brcm/BCM.hcd) — chip is running UNPATCHED"
+        info "hci0 is up and usable regardless; install the link to apply the patch."
     else
-        fail "Kernel reported: firmware Patch file not found at boot"
-        info "Chip running at default slow baud rate — A2DP will be choppy"
+        fail "Kernel reported: firmware Patch file not found at boot, and hci0 is not usable"
+        info "Chip running at default slow baud rate — see step 2f (baud rate)"
     fi
 elif echo "$BT_JOURNAL" | grep -q "failed to write update baudrate"; then
     warn "Kernel reported: failed to update baudrate — firmware may be wrong version"

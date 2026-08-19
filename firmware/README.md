@@ -40,8 +40,23 @@ firmware/
 
 ### Why Linux needs this
 The chip runs from internal ROM without external firmware — basic Bluetooth
-(scan, pair, connect) works. **A2DP audio is choppy** without firmware because
-the chip stays at a slower default baud rate.
+(scan, pair, connect) works. This repo ships the patch because `linux-firmware`
+does not, not because its effect has been quantified.
+
+**What is measured**, on MacBookPro14,1 / Linux 7.1.8 / BlueZ 5.87: the patch
+loads cleanly (all 337 vendor commands accepted, `hci0` stays up). Nothing else.
+
+**What is not established**: any effect on A2DP quality. A controlled A/B over
+two full power cycles — a warm `hci_uart` rebind is not a control, since this
+board reports `No reset resource` and never power-cycles the chip, so patch RAM
+survives — produced an identical HCI fingerprint (Local Version, Local Supported
+Features, Buffer Size, Local Supported Commands) with and without the file, and
+the HCI revision stayed `0x15FC` in both arms. Apple's EFI may already load an
+equivalent image at power-on. Reports of choppy A2DP are equally consistent with
+the baud-rate problem, which the SMC Reset addresses.
+
+If you can measure a difference on your machine, please open an issue with the
+before/after output of `hcitool -i hci0 cmd 0x04 0x0001`.
 
 The `linux-firmware` package does **not** ship BCM4350C0.hcd (it's an OEM
 Apple file). It must be extracted from macOS.
@@ -70,14 +85,19 @@ xxd firmware/bluetooth/BCM4350C0.hcd | head -5
 
 ```bash
 sudo cp firmware/bluetooth/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # older kernel compat
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
+sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # descriptive only
 sudo rmmod hci_uart && sudo modprobe hci_uart
 ```
 
 Verify:
 ```bash
-journalctl -b -k | grep "hci0.*BCM"   # should NOT show "firmware Patch file not found"
+journalctl -b -k | grep "hci0.*BCM"   # want: BCM: firmware 'brcm/BCM.hcd' Patch
+                                      # and NO "Patch command N failed" lines
 hciconfig hci0                         # should show: UP RUNNING, real BD Address
+
+# "firmware Patch file not found, tried: brcm/BCM.hcd" means NO patch was applied.
+# It is not cosmetic and it is not about a secondary file — the link above is missing.
 ```
 
 ### ⚠️ SMC Reset required once after migrating from macOS
