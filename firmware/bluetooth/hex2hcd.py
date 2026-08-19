@@ -47,11 +47,15 @@ MINI_HEX    = os.path.join(SCRIPT_DIR, "source", "BCM4350-MiniDriver-uart.hex")
 UPD_HEX     = os.path.join(SCRIPT_DIR, "source", "BCM4350-Updater.hex")
 DEFAULT_OUT = os.path.join(SCRIPT_DIR, "BCM4350C0.hcd")
 
-# HCI_VS_Write_RAM: 01 4C FC <len> <addr:4LE> <data...>
+# HCI_VS_Write_RAM: 4C FC <len> <addr:4LE> <data...>
+# An .hcd file holds bare HCI command records: opcode (2 bytes LE), parameter
+# length (1 byte), parameters. The 0x01 H4 UART packet-type byte belongs on the
+# wire and is prepended by the kernel transport (btbcm_patchram reads these
+# records as struct hci_command_hdr), so it must NOT be stored in the file.
 # Maximum HCI parameter length = 255 bytes.
 # With 4-byte address prefix, max data per chunk = 251 bytes.
-HCI_VS_WRITE_RAM  = b'\x01\x4c\xfc'
-HCI_VS_LAUNCH_RAM = b'\x01\x4e\xfc\x04'
+HCI_VS_WRITE_RAM  = b'\x4c\xfc'
+HCI_VS_LAUNCH_RAM = b'\x4e\xfc\x04'
 MAX_DATA_PER_CMD  = 251
 
 
@@ -108,8 +112,10 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
       4. Execute firmware              (HCI_VS_Launch_RAM at its start address)
     """
     hcd = bytearray()
+    n_write = n_launch = 0
 
     def write_ram(address, data):
+        nonlocal n_write
         data = bytearray(data)
         for i in range(0, len(data), MAX_DATA_PER_CMD):
             chunk   = data[i:i + MAX_DATA_PER_CMD]
@@ -119,10 +125,13 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
             hcd.extend(HCI_VS_WRITE_RAM)
             hcd.append(len(payload))
             hcd.extend(payload)
+            n_write += 1
 
     def launch_ram(address):
+        nonlocal n_launch
         hcd.extend(HCI_VS_LAUNCH_RAM)
         hcd.extend(struct.pack('<I', address & 0xFFFFFFFF))
+        n_launch += 1
 
     mini_segs = parse_intel_hex(minidriver_hex)
     upd_segs  = parse_intel_hex(updater_hex)
@@ -143,8 +152,6 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
     with open(output_hcd, 'wb') as f:
         f.write(hcd)
 
-    n_write  = hcd.count(bytes(HCI_VS_WRITE_RAM))
-    n_launch = hcd.count(bytes(HCI_VS_LAUNCH_RAM))
     print(f"Written: {output_hcd}")
     print(f"  Size : {len(hcd):,} bytes")
     print(f"  Commands: {n_write} Write_RAM + {n_launch} Launch_RAM")
