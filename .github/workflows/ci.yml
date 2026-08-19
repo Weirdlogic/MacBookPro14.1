@@ -70,9 +70,12 @@ jobs:
 
           echo ""
           echo "=== Result ==="
-          OKS=$(grep -c "\[✔\]" /tmp/run.log || echo 0)
-          WARNS=$(grep -c "\[!\]" /tmp/run.log || echo 0)
-          ERRS=$(grep -c "\[✘\]" /tmp/run.log || echo 0)
+          # grep -c already prints 0 when there is no match, and *also* exits 1.
+          # "|| echo 0" therefore appended a second 0 and produced multi-line
+          # counts like "0\n0". Suppress the exit status instead of adding output.
+          OKS=$(grep -c "\[✔\]" /tmp/run.log) || true
+          WARNS=$(grep -c "\[!\]" /tmp/run.log) || true
+          ERRS=$(grep -c "\[✘\]" /tmp/run.log) || true
           echo "Passed: $OKS  Warnings: $WARNS  Errors: $ERRS"
 
           # Fail CI only on unexpected errors (not hardware-not-found)

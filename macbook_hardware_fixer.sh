@@ -749,7 +749,22 @@ log_info "If channels are limited, set country: sudo iw reg set RO  (or your cou
 log_step "4/11 — FaceTime HD Camera — Broadcom PCIe driver (facetimehd)"
 
 PKGS_BUILD=(git curl xz-utils cpio build-essential kmod libssl-dev)
-apt-get install -y --no-install-recommends "${PKGS_BUILD[@]}" linux-headers-"$KERNEL"
+apt-get install -y --no-install-recommends "${PKGS_BUILD[@]}"
+
+# Kernel headers are needed only to compile the facetimehd module, which is
+# best-effort like everything else in the subshell below. They are routinely
+# unavailable for the running kernel: right after a kernel upgrade and before
+# rebooting into it, or on any kernel that ships no headers package at all.
+# This line used to be a plain apt-get install, and with `set -euo pipefail` in
+# effect a missing package aborted the entire script here — steps 5 through 11
+# never ran and the user was told nothing. Warn and carry on instead.
+HEADERS_OK=true
+if ! apt-get install -y --no-install-recommends linux-headers-"$KERNEL"; then
+    HEADERS_OK=false
+    log_warn "linux-headers-$KERNEL not available — facetimehd module build skipped."
+    log_info "Normal right after a kernel upgrade, before rebooting into the new kernel."
+    log_info "Re-run this script once the headers package exists. Everything else continues."
+fi
 
 WEBCAM_DIR="/tmp/macbook_webcam_$$"
 mkdir -p "$WEBCAM_DIR"
@@ -778,6 +793,11 @@ mkdir -p "$WEBCAM_DIR"
     fi
 
     cd "$WEBCAM_DIR"
+
+    if ! $HEADERS_OK; then
+        log_warn "No kernel headers — camera module not built (firmware above still applies)."
+        exit 0
+    fi
 
     log_info "Cloning facetimehd kernel module (kernel $KERNEL)..."
     if ! git clone --depth=1 https://github.com/patjak/facetimehd.git -q 2>&1; then
