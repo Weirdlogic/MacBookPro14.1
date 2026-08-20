@@ -76,8 +76,19 @@ macOS ships the firmware as two Intel HEX files:
 python3 firmware/bluetooth/hex2hcd.py
 
 # Verify output
-xxd firmware/bluetooth/BCM4350C0.hcd | head -5
-# Expected first bytes: 01 4c fc ff ...  (HCI_VS_Write_RAM opcode)
+od -A d -t x1 -N 8 firmware/bluetooth/BCM4350C0.hcd
+# Expected: 4c fc ff 00 02 0d 00 ...  — opcode 0xFC4C (HCI_VS_Write_RAM), plen 0xFF,
+# then the 4-byte little-endian address. There is no leading 01: that is the H4 UART
+# packet-type byte, which the kernel transport prepends on the wire, so it must not
+# be stored in the file.
+
+tail -c 7 firmware/bluetooth/BCM4350C0.hcd | od -A n -t x1
+# Expected: 4e fc 04 ff ff ff ff  — the final HCI_VS_Launch_RAM must use the
+# default-entrypoint sentinel 0xFFFFFFFF. Launching at the updater's first segment
+# address instead downloads cleanly and then leaves the controller mute on the UART.
+
+sha256sum firmware/bluetooth/BCM4350C0.hcd
+# f968320baf7109e19776d7b720a19f71babced1e675602df3632a40bdba6ab34
 ```
 
 ### Install on Ubuntu
