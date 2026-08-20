@@ -114,7 +114,7 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
       1. Write MiniDriver to chip RAM (HCI_VS_Write_RAM, chunked)
       2. Execute MiniDriver            (HCI_VS_Launch_RAM at its start address)
       3. Write full firmware to RAM    (HCI_VS_Write_RAM, chunked)
-      4. Execute firmware              (HCI_VS_Launch_RAM at its start address)
+      4. Execute firmware              (HCI_VS_Launch_RAM, default entrypoint)
     """
     hcd = bytearray()
     n_write = n_launch = 0
@@ -151,7 +151,14 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
     for addr, data in upd_segs:
         write_ram(addr, data)
     if upd_segs:
-        launch_ram(upd_segs[0][0])
+        # Launch through the default-entrypoint sentinel, not the updater's first
+        # segment address. On MacBookPro14,1 launching directly at 0xFF004000
+        # completes the download but leaves the controller mute on the UART: the
+        # HCI_VS_Update_UART_Baud_Rate (0xfc18) that btbcm_setup_patchram() sends
+        # next times out, Reset fails with -110, and no controller is registered.
+        # 0xFFFFFFFF lets the controller use its configured entrypoint and keep
+        # its board configuration; it is also what BlueZ's own hex2hcd emits.
+        launch_ram(0xFFFFFFFF)
 
     os.makedirs(os.path.dirname(os.path.abspath(output_hcd)), exist_ok=True)
     with open(output_hcd, 'wb') as f:
