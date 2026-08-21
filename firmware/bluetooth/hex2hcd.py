@@ -18,13 +18,15 @@ Usage:
   python3 hex2hcd.py -o /out/path.hcd # custom output path
 
 Output: BCM4350C0.hcd  (~86 kB)
-  Install at: /lib/firmware/brcm/BCM4350C0.hcd
-  Symlink:    /lib/firmware/brcm/BCM.hcd    -> BCM4350C0.hcd  (REQUIRED — see below)
-  Symlink:    /lib/firmware/brcm/BCM2E7C.hcd -> BCM4350C0.hcd  (descriptive only)
 
-  BCM.hcd is not a fallback: this chip reports subver 0x6186, which has no entry
-  in bcm_uart_subver_table, so btbcm_initialize() leaves hw_name NULL and asks
-  for brcm/BCM.hcd and nothing else. Without that link nothing is ever loaded.
+  Nothing in this repo installs it. The patch has no measured effect on this chip
+  and a build with the wrong launch address takes the controller off the UART
+  entirely — see firmware/README.md before placing it by hand.
+
+  If you do: /lib/firmware/brcm/BCM.hcd is the only path worth writing. This chip
+  reports subver 0x6186, which has no entry in bcm_uart_subver_table, so
+  btbcm_initialize() leaves hw_name NULL and asks for brcm/BCM.hcd and nothing
+  else. A file called BCM4350C0.hcd is never read.
 
 Hardware:
   MacBook Pro 13" 2017 (MacBookPro14,1)
@@ -170,11 +172,10 @@ def build_hcd(minidriver_hex, updater_hex, output_hcd):
     print(f"  MiniDriver : 0x{mini_segs[0][0]:08X}  ({sum(len(d) for _,d in mini_segs):,} bytes)")
     print(f"  Firmware   : 0x{upd_segs[0][0]:08X}  ({sum(len(d) for _,d in upd_segs):,} bytes)")
     print()
-    print(f"Install:")
-    print(f"  sudo cp {output_hcd} /lib/firmware/brcm/BCM4350C0.hcd")
-    print(f"  sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd     # required")
-    print(f"  sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd # descriptive")
-    print(f"  sudo rmmod hci_uart && sudo modprobe hci_uart")
+    print("Not installed by this repo — opt-in only, see firmware/README.md.")
+    print("If you want to try it anyway:")
+    print(f"  sudo cp {output_hcd} /lib/firmware/brcm/BCM.hcd")
+    print("  then a full power-off, not a reboot (patch RAM outlives a warm boot)")
 
 
 def main():

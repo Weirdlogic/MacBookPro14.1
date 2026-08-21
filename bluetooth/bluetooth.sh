@@ -174,33 +174,23 @@ ok "bluetooth.service active"
 echo ""
 
 # =============================================================================
-# 5 — Firmware: delegate to macbook_hardware_fixer.sh
-#     This script does NOT install firmware — the main fixer does.
+# 5 — Firmware patch: report only, never install
+#     Neither this script nor macbook_hardware_fixer.sh installs the .hcd patch.
+#     It has no measured effect on this chip and a wrong build takes the
+#     controller off the UART entirely — see firmware/README.md for the numbers.
 # =============================================================================
-echo -e "${BOLD}5. Bluetooth firmware status${NC}"
+echo -e "${BOLD}5. Bluetooth firmware patch status${NC}"
 
-BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
-if [ -f "$BT_FW" ]; then
-    ok "BCM4350C0.hcd already installed: $BT_FW"
-    # brcm/BCM.hcd is the only name btbcm requests on this chip (subver 0x6186 is
-    # absent from bcm_uart_subver_table, so hw_name is NULL). Without this link
-    # the file above is never read.
-    for link in BCM.hcd BCM2E7C.hcd; do
-        lpath="/lib/firmware/brcm/$link"
-        if [ -L "$lpath" ]; then
-            ok "$link link present"
-        elif [ -e "$lpath" ]; then
-            warn "$lpath is a regular file — leaving it alone"
-        else
-            fix "Adding $link link → BCM4350C0.hcd"
-            ln -sf BCM4350C0.hcd "$lpath"
-            ok "Link created: $lpath"
-        fi
-    done
+# brcm/BCM.hcd is the only name btbcm requests on this chip: subver 0x6186 is
+# absent from bcm_uart_subver_table, so hw_name is NULL and it is the sole
+# candidate. Any other name sitting in /lib/firmware/brcm is never read.
+BT_FW="/lib/firmware/brcm/BCM.hcd"
+if [ -e "$BT_FW" ]; then
+    ok "Patch present: $BT_FW (installed by hand — not touched by this script)"
+    info "To go back to unpatched: sudo rm $BT_FW, then a full power-off."
 else
-    warn "BCM4350C0.hcd NOT installed"
-    info "Effect on A2DP quality is unverified — see firmware/README.md"
-    info "Install: sudo bash macbook_hardware_fixer.sh  (step 2 installs the firmware)"
+    ok "No patch installed — the supported default. hci0 works unpatched."
+    info "\"firmware Patch file not found, tried: brcm/BCM.hcd\" in dmesg is expected."
 fi
 echo ""
 
@@ -220,12 +210,6 @@ sep
 echo -e "${BOLD}${GREEN}  Done!${NC}"
 sep
 echo ""
-
-if ! [ -f "$BT_FW" ]; then
-    echo -e "  ${YELLOW}Next step:${NC} install the full firmware stack:"
-    echo -e "    sudo bash macbook_hardware_fixer.sh"
-    echo ""
-fi
 
 echo -e "  ${BOLD}Required — ONE-TIME SMC Reset${NC} (clears macOS 3 Mbaud baud rate):"
 echo ""

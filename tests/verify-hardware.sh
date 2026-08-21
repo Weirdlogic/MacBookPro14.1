@@ -135,31 +135,26 @@ fi
 # =============================================================================
 step "2/11 — Bluetooth BCM4350C0 UART"
 
-BT_FW="/lib/firmware/brcm/BCM4350C0.hcd"
-BT_FW_OLD="/lib/firmware/brcm/BCM2E7C.hcd"
-# The name that actually matters: this chip reports subver 0x6186, which is not in
-# bcm_uart_subver_table, so btbcm_initialize() requests brcm/BCM.hcd and nothing
-# else. BCM4350C0.hcd on its own is never read by a mainline kernel.
+# The firmware patch is NOT installed by this repo — it has no measured effect on
+# this chip and a wrong build takes the controller off the UART entirely. Its
+# absence is the expected, supported state, so it is reported and never failed on.
+#
+# The only name that would matter if someone does install one: this chip reports
+# subver 0x6186, which is not in bcm_uart_subver_table, so btbcm_initialize()
+# requests brcm/BCM.hcd and nothing else. A file under any other name is dead
+# weight — never read by a mainline kernel.
 BT_FW_KERNEL="/lib/firmware/brcm/BCM.hcd"
-if [ -f "$BT_FW" ]; then
-    pass "Bluetooth firmware present: BCM4350C0.hcd"
-    if [ -e "$BT_FW_KERNEL" ]; then
-        pass "brcm/BCM.hcd present — this is the name the kernel actually requests"
-    else
-        fail "brcm/BCM.hcd MISSING — the kernel requests this name and no other"
-        info "BCM4350C0.hcd alone is never loaded on a mainline kernel."
-        info "Fix: sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd"
-    fi
-    if [ -e "$BT_FW_OLD" ]; then
-        pass "Compatibility link BCM2E7C.hcd → BCM4350C0.hcd present"
-    else
-        info "Compatibility link BCM2E7C.hcd absent (descriptive only — not requested by the kernel)"
-    fi
+if [ -e "$BT_FW_KERNEL" ]; then
+    info "Bluetooth patch present: $BT_FW_KERNEL (installed by hand, not by this repo)"
+    info "No measured effect on controller state — see firmware/README.md"
 else
-    fail "Bluetooth firmware MISSING: /lib/firmware/brcm/BCM4350C0.hcd"
-    info "Effect on A2DP quality is not established — see firmware/README.md"
-    info "See README step 5 or run macbook_hardware_fixer.sh step 2 with macOS partition"
+    pass "No Bluetooth firmware patch installed — the supported default"
 fi
+for stray in /lib/firmware/brcm/BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd; do
+    if [ -e "$stray" ]; then
+        info "$stray exists but is never requested by the kernel on this chip"
+    fi
+done
 
 if [ -d /sys/class/bluetooth/hci0 ]; then
     pass "hci0 Bluetooth interface present in sysfs"
@@ -208,14 +203,24 @@ _HCI_ADDR_NOW=$(hciconfig hci0 2>/dev/null | grep "BD Address" | awk '{print $3}
 [ -n "$_HCI_ADDR_NOW" ] && [ "$_HCI_ADDR_NOW" != "00:00:00:00:00:00" ] && _HCI_WORKING=true
 if echo "$BT_JOURNAL" | grep -q "firmware Patch file not found"; then
     if $_HCI_WORKING; then
-        warn "Kernel found no patch file (brcm/BCM.hcd) — chip is running UNPATCHED"
-        info "hci0 is up and usable regardless; install the link to apply the patch."
+        pass "Kernel found no patch file (brcm/BCM.hcd) — chip running unpatched, as intended"
     else
-        fail "Kernel reported: firmware Patch file not found at boot, and hci0 is not usable"
-        info "Chip running at default slow baud rate — see step 2f (baud rate)"
+        fail "hci0 is not usable. The missing patch file is not the cause — see the baud rate step"
+        info "Chip running at default slow baud rate; a patch would not fix that"
     fi
-elif echo "$BT_JOURNAL" | grep -q "failed to write update baudrate"; then
-    warn "Kernel reported: failed to update baudrate — firmware may be wrong version"
+# On the baud-rate write it is the error code that carries the signal, not the
+# presence of the message. -16 (EBUSY) means the controller answered and refused:
+# normal on Apple's fixed-speed UART, and proof the chip is alive and talking.
+# -110 (ETIMEDOUT) means nothing answered at all.
+elif echo "$BT_JOURNAL" | grep -q "failed to write update baudrate (-110)"; then
+    fail "Baud rate command timed out (-110) — the controller stopped answering the UART"
+    if [ -e "$BT_FW_KERNEL" ]; then
+        info "A patch file is installed, and a bad one causes exactly this — the"
+        info "download completes, then the chip goes silent. Remove $BT_FW_KERNEL"
+        info "and power off completely; a warm reboot does not clear patch RAM here."
+    fi
+elif echo "$BT_JOURNAL" | grep -q "failed to write update baudrate (-16)"; then
+    pass "Baud rate write refused with -16 (EBUSY) — expected on Apple's fixed-speed UART"
 elif echo "$BT_JOURNAL" | grep -q "BCM4350C0"; then
     pass "Kernel recognised BCM4350C0 at boot"
 fi

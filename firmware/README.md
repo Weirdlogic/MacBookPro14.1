@@ -38,22 +38,50 @@ firmware/
 | Linux name | BCM4350C0 (die revision C0) |
 | Firmware version | v134 c5628 (from macOS system\_profiler) |
 
-### Why Linux needs this
-The chip runs from internal ROM without external firmware — basic Bluetooth
-(scan, pair, connect) works. This repo ships the patch because `linux-firmware`
-does not, not because its effect has been quantified.
+### Not installed by default — read this before installing it by hand
 
-**What is measured**, on MacBookPro14,1 / Linux 7.1.8 / BlueZ 5.87: the patch
-loads cleanly (all 337 vendor commands accepted, `hci0` stays up). Nothing else.
+The chip runs from internal ROM without any external firmware, and basic
+Bluetooth (scan, pair, connect) works that way. **Neither `macbook_hardware_fixer.sh`
+nor `bluetooth/bluetooth.sh` installs this patch.** The files are kept here as a
+reference and for anyone who wants to experiment.
 
-**What is not established**: any effect on A2DP quality. A controlled A/B over
-two full power cycles — a warm `hci_uart` rebind is not a control, since this
-board reports `No reset resource` and never power-cycles the chip, so patch RAM
-survives — produced an identical HCI fingerprint (Local Version, Local Supported
-Features, Buffer Size, Local Supported Commands) with and without the file, and
-the HCI revision stayed `0x15FC` in both arms. Apple's EFI may already load an
-equivalent image at power-on. Reports of choppy A2DP are equally consistent with
-the baud-rate problem, which the SMC Reset addresses.
+**No measured benefit.** On MacBookPro14,1 / Linux 7.1.8 / BlueZ 5.87, three
+consecutive cold boots with nothing differing between arms but the file itself:
+
+| | no patch | patch applied |
+|---|---|---|
+| Read Local Version | `08 FC 15 08 0F 00 86 61` | identical |
+| Read Local Supported Features | `BF FE CF FE DB FF 7B 87` | identical |
+| Read Buffer Size | `FD 03 C0 08 00 01 00` | identical |
+| HCI revision | `0x15FC` | `0x15FC` |
+
+No change in any field, and no bump in the HCI revision, which is the usual
+signature of an applied Broadcom patchram. At a cold *unpatched* boot the chip
+already reports `build 1532` rather than `0000`, so Apple's EFI most likely loads
+an equivalent image at power-on and Linux would be rewriting it for nothing. The
+choppy-A2DP reports this firmware was once credited with are just as consistent
+with the baud-rate problem the SMC Reset addresses.
+
+A warm `hci_uart` rebind is **not** a valid control here: this board reports
+`No reset resource`, so unbind/bind never resets the chip and patch RAM survives.
+Only a full power-off gives a clean arm.
+
+**A real downside, measured.** Get the final `HCI_VS_Launch_RAM` address wrong by
+four bytes and the chip accepts all 337 vendor commands and then stops answering
+the UART completely:
+
+```text
+Bluetooth: hci0: BCM 'brcm/BCM.hcd' Patch
+Bluetooth: hci0: command 0xfc18 tx timeout
+Bluetooth: hci0: BCM: failed to write update baudrate (-110)
+Bluetooth: hci0: BCM: Reset failed (-110)
+```
+
+No controller registered at all — strictly worse than having no patch file.
+Reproduced on two independent A1708 boards. Recovering from it needs the file
+removed **and** another full power-off, since patch RAM outlives a warm reboot.
+
+Zero measured benefit against that failure mode is why this is opt-in.
 
 If you can measure a difference on your machine, please open an issue with the
 before/after output of `hcitool -i hci0 cmd 0x04 0x0001`.
@@ -91,15 +119,23 @@ sha256sum firmware/bluetooth/BCM4350C0.hcd
 # f968320baf7109e19776d7b720a19f71babced1e675602df3632a40bdba6ab34
 ```
 
-### Install on Ubuntu
-`macbook_hardware_fixer.sh` handles this automatically (step 2). Manual install:
+### Installing it by hand, if you want to try it anyway
+Nothing in this repo does this for you. `brcm/BCM.hcd` is the only name the
+kernel requests on this chip, so that is the only file worth placing:
 
 ```bash
-sudo cp firmware/bluetooth/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # descriptive only
-sudo rmmod hci_uart && sudo modprobe hci_uart
+sudo cp firmware/bluetooth/BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd
 ```
+
+Then **power off completely** and start again from the button. A warm reboot is
+not enough to evaluate it, and — more importantly — is not enough to undo it if
+it goes wrong. To go back:
+
+```bash
+sudo rm /lib/firmware/brcm/BCM.hcd
+```
+
+followed by another full power-off.
 
 Verify:
 ```bash

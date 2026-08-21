@@ -15,7 +15,7 @@ Covers: Audio · GPU · Bluetooth · WiFi · Camera · Thunderbolt · Battery ·
 | Audio (microphone) | Cirrus CS8409 | ✅ Works | PipeWire filter-chain DSP (noise gate + autogain) — `macbook_hardware_fixer.sh` step 0 |
 | Intel GPU | Iris Plus 640 (Kaby Lake GT3) | ✅ Works + VA-API | `macbook_hardware_fixer.sh` step 1 |
 | WiFi | Broadcom BCM4350 | ✅ Works | `macbook_hardware_fixer.sh` step 3 |
-| Bluetooth | Broadcom BCM4350C0 (UART) | ⚠️ SMC Reset needed once; firmware patch optional | `macbook_hardware_fixer.sh` step 2 · `bluetooth/bluetooth.sh` |
+| Bluetooth | Broadcom BCM4350C0 (UART) | ⚠️ SMC Reset needed once; firmware patch not installed (no measured effect) | `macbook_hardware_fixer.sh` step 2 · `bluetooth/bluetooth.sh` |
 | FaceTime HD Camera | Broadcom 720p PCIe 14e4:1570 | ⚠️ Needs driver | `macbook_hardware_fixer.sh` step 4 |
 | Thunderbolt 3 | Intel Alpine Ridge 4C (JHL6540) | ✅ Works | `macbook_hardware_fixer.sh` step 5 |
 | Battery & Thermal | Intel i5-7360U + applesmc | ✅ Works | `macbook_hardware_fixer.sh` step 6 |
@@ -83,28 +83,12 @@ Thunderbolt, Battery, Fan, Keyboard backlight, Touchpad, Suspend,
 sudo ./macbook_hardware_fixer.sh
 ```
 
-**Step 4 — Install the Bluetooth firmware patch** (optional; basic scan/pair works without it):
-
-The Broadcom **BCM4350C0** UART Bluetooth chip needs firmware not in `linux-firmware`.
-See the [Bluetooth section](#2-bluetooth--bcm4350c0) below for full details.
-
-```bash
-# Option A: copy from macOS (dual-boot or USB installer)
-sudo cp /path/to/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd  # descriptive only
-sudo rmmod hci_uart && sudo modprobe hci_uart
-
-# Option B: community-extracted firmware
-# Search GitHub for 'BCM4350C0.hcd' and place at /lib/firmware/brcm/BCM4350C0.hcd
-```
-
-**Step 5 — Reboot:**
+**Step 4 — Reboot:**
 ```bash
 sudo reboot
 ```
 
-**Step 6 — Verify everything was applied correctly:**
+**Step 5 — Verify everything was applied correctly:**
 ```bash
 # Full hardware check (all 12 steps including audio + color calibration):
 ./tests/verify-hardware.sh
@@ -147,10 +131,17 @@ vainfo   # should list VAProfileH264*, VAProfileHEVC* entries
 **Script:** `macbook_hardware_fixer.sh` step 2 · standalone: `bluetooth/bluetooth.sh`
 
 The chip self-identifies as `BCM4350C0` (macOS marketing name: BCM2E7C). It is a **UART
-chip** (not USB) — connected via serial0/ttyS4. The chip works from internal ROM; external
-firmware is optional. Its effect on A2DP quality is unverified — see `firmware/README.md`
-for the measurements. Note that a mainline kernel requests **`/lib/firmware/brcm/BCM.hcd`**
-and no other name on this machine, so installing `BCM4350C0.hcd` alone loads nothing.
+chip** (not USB) — connected via serial0/ttyS4, and it works from internal ROM.
+
+**No firmware patch is installed**, by this script or any other in the repo. Across three
+cold boots the controller's HCI fingerprint was byte-identical with and without it, and a
+build with the wrong launch address takes the controller off the UART entirely. The blob
+and its converter stay in `firmware/bluetooth/` for anyone who wants to experiment;
+`firmware/README.md` has the numbers and the manual steps.
+
+If you do install one by hand, note that a mainline kernel requests
+**`/lib/firmware/brcm/BCM.hcd`** and no other name on this machine — a file called
+`BCM4350C0.hcd` is never read.
 
 #### SMC Reset — required ONCE after migrating from macOS
 
@@ -173,24 +164,11 @@ After SMC Reset the chip resets to factory baud rate and `hci0` will appear.
 **What the script fixes:**
 - Removes wrong USB firmware symlinks (BCM4350C5-0a5c-*.hcd) that break the UART chip
 - bluez 5.65+ config bug: `AutoEnable` moved from `[General]` to `[Policy]`
-- Auto-installs `apfs-fuse` and scans for a macOS HFS+/APFS partition to extract BCM4350C0.hcd
 - Creates `/etc/udev/rules.d/60-bluetooth-macbook.rules` to bring `hci0` up automatically
 - WirePlumber: disables A2DP → HFP/HSP auto-switch (prevents AirPods Pro dropouts)
 
-**Firmware (optional — effect unverified; linux-firmware does NOT have it):**
-
-```bash
-# Option A: from running macOS (dual-boot) or macOS USB installer
-ls /usr/share/firmware/bluetooth/     # find BCM4350C0.hcd
-sudo cp /path/to/BCM4350C0.hcd /lib/firmware/brcm/BCM4350C0.hcd
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM.hcd      # the name the kernel requests
-sudo ln -sf BCM4350C0.hcd /lib/firmware/brcm/BCM2E7C.hcd   # descriptive only
-
-# Option B: community-extracted firmware (search GitHub for 'BCM4350C0.hcd')
-
-# Reload driver (or reboot):
-sudo rmmod hci_uart && sudo modprobe hci_uart
-```
+**Firmware patch — not installed, opt-in only.** No measured effect on this chip, and a
+wrong build costs you the controller. See `firmware/README.md` before trying it.
 
 **Verify:**
 ```bash

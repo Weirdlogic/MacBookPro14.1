@@ -497,39 +497,38 @@ PYEOF
     log_info "FastConnectable=true in [General], AutoEnable/Reconnect in [Policy]."
 fi
 
-# --- 2c. Firmware fix for BCM4350C0 UART chip ---
-# The BCM4350C0 Bluetooth on MacBook Pro 14,1 uses a UART connection (serial0 / ttyS4).
+# --- 2c. Bluetooth firmware for BCM4350C0 — deliberately NOT installed ---
+# The repo carries firmware/bluetooth/BCM4350C0.hcd and the converter that builds
+# it from macOS's .hex sources. This script does not install it, on purpose.
 #
-# How the kernel names the firmware file:
-#   The driver (hci_uart_bcm / btbcm) queries the chip via HCI at boot and builds
-#   the filename from a hardware name looked up in bcm_uart_subver_table
-#   (drivers/bluetooth/hci_bcm.c). This chip reports subver 0x6186, which has no
-#   entry in that table, so btbcm_initialize() leaves hw_name NULL and requests
-#   exactly one file:
-#       /lib/firmware/brcm/BCM.hcd
-#   It never asks for BCM4350C0.hcd or BCM2E7C.hcd on a mainline kernel — those
-#   are kept only as descriptive names / compatibility symlinks. Verified on
-#   MacBookPro14,1 with Linux 7.1.8: the chip self-identifies as
-#   "BCM4350C0 UART 37.4 MHz Gamay USI UHE" but the log line reads
-#   "BCM: firmware 'brcm/BCM.hcd' Patch".
+# Background on the filename, because it is easy to get wrong: the chip reports
+# subver 0x6186, which has no entry in bcm_uart_subver_table, so btbcm_initialize()
+# leaves hw_name NULL and requests exactly one file, /lib/firmware/brcm/BCM.hcd.
+# It never asks for BCM4350C0.hcd or BCM2E7C.hcd on a mainline kernel.
 #
-# NOTE: macOS calls this same chip "BCM2E7C" (marketing name).
-#   The linux-firmware package does NOT ship this firmware (proprietary, OEM-specific).
+# Why it is not installed. Measured on MacBookPro14,1 (Linux 7.1.8) across three
+# consecutive cold boots, nothing differing between arms but the file itself:
 #
-# Symptoms without firmware (observed on this machine):
-#   "BCM: failed to write update baudrate (-16)"   ← running at default slow baud
-#   "BCM: firmware Patch file not found, tried: brcm/BCM.hcd"
-#     ↑ this means NO patch was applied. It is not cosmetic.
+#   no patch        hci0 up, Local Version 08 FC 15 08 0F 00 86 61
+#   patch applied   hci0 up, byte-identical fingerprint, HCI revision still 0x15FC
 #
-# What the patch is measured to do: it loads cleanly (all 337 vendor commands
-# accepted, hci0 stays up). Whether it changes A2DP quality is NOT established —
-# on MacBookPro14,1 a controlled A/B across two full power cycles showed an
-# identical HCI fingerprint (Local Version / Features / Buffer Size / Supported
-# Commands) with and without the file, and the HCI revision stayed 0x15FC.
-# Apple's EFI may already load an equivalent image at power-on. The choppy-A2DP
-# reports are equally consistent with the baud-rate issue handled in step 2f.
+# No measurable change to controller state, and no bump in the HCI revision, which
+# is the usual signature of an applied Broadcom patchram. At a cold unpatched boot
+# the chip already reports "build 1532" rather than 0000, so Apple's EFI most
+# likely loads an equivalent image at power-on and Linux would be rewriting it for
+# nothing. The choppy-A2DP reports this firmware was once credited with are just
+# as consistent with the baud-rate behaviour handled further down in this step.
 #
-BT_FW_DEST="/lib/firmware/brcm/BCM4350C0.hcd"
+# The downside, by contrast, is real and was also measured: with the final
+# HCI_VS_Launch_RAM address wrong by four bytes the chip accepts all 337 vendor
+# commands and then stops answering the UART entirely — no controller registered
+# at all, which is strictly worse than shipping no patch. Two independent A1708
+# boards, same failure.
+#
+# Zero measured benefit against a failure mode that costs the user their Bluetooth
+# is not a trade to make by default on someone else's machine. The file stays in
+# the repo for anyone who wants to experiment; firmware/README.md has the manual
+# steps and what to look for in dmesg.
 
 # --- 2c-pre. Remove wrong USB firmware that breaks the UART chip ---
 # BCM4350C0 is a UART chip. USB firmware (BCM4350C5-0a5c-*.hcd) applied to it
@@ -547,51 +546,20 @@ for fname in BCM.hcd BCM2E7C.hcd BCM4350C5.hcd BCM4350C0.hcd; do
     fi
 done
 
-# --- 2c. Bluetooth firmware (BCM4350C0.hcd) ---
-# The firmware is included in this repo at firmware/bluetooth/BCM4350C0.hcd.
-# It was extracted from macOS Ventura using hex2hcd.py and the source .hex files
-# (firmware/bluetooth/source/BCM4350-MiniDriver-uart.hex + BCM4350-Updater.hex).
-BT_FW_REPO="$SCRIPT_DIR/firmware/bluetooth/BCM4350C0.hcd"
+# Report what is there, install nothing. A patch someone put in place by hand is
+# theirs to keep — this script neither adds nor removes it.
+BT_FW_KERNEL="/lib/firmware/brcm/BCM.hcd"
 
-mkdir -p /lib/firmware/brcm
-
-if [ -f "$BT_FW_REPO" ]; then
-    # Refresh unconditionally when the content differs: releases before this one
-    # shipped an .hcd that carried a stray 0x01 H4 packet-type byte per record,
-    # which btbcm_patchram() cannot parse. Skipping on "file exists" would leave
-    # that broken blob in place forever.
-    if [ -f "$BT_FW_DEST" ] && cmp -s "$BT_FW_REPO" "$BT_FW_DEST"; then
-        log_ok "Bluetooth firmware already up to date: $BT_FW_DEST"
-    else
-        [ -f "$BT_FW_DEST" ] && log_info "Existing $BT_FW_DEST differs from repo copy — refreshing"
-        cp "$BT_FW_REPO" "$BT_FW_DEST"
-        chmod 644 "$BT_FW_DEST"
-        log_ok "Bluetooth firmware installed: $BT_FW_DEST"
-    fi
-
-    # brcm/BCM.hcd is the ONLY name a mainline kernel requests on this machine
-    # (subver 0x6186 is absent from bcm_uart_subver_table → hw_name is NULL).
-    # Without this link the file above is never loaded. Only replace our own
-    # symlink — never clobber a real file someone installed deliberately.
-    for link in BCM.hcd BCM2E7C.hcd; do
-        lpath="/lib/firmware/brcm/$link"
-        if [ -e "$lpath" ] && [ ! -L "$lpath" ]; then
-            log_warn "$lpath exists as a regular file — leaving it alone"
-        else
-            ln -sf BCM4350C0.hcd "$lpath"
-            log_ok "Firmware link: $lpath → BCM4350C0.hcd"
-        fi
-    done
-    log_info "Source: firmware/bluetooth/BCM4350C0.hcd (converted from macOS Ventura hex files)"
+if [ -e "$BT_FW_KERNEL" ]; then
+    log_info "Bluetooth patch present at $BT_FW_KERNEL — installed by hand, left alone."
 else
-    log_warn "Bluetooth firmware not found in repo ($BT_FW_REPO) — BT works without it."
-    log_info "Rebuild: python3 $SCRIPT_DIR/firmware/bluetooth/hex2hcd.py"
-    log_info "Requires: firmware/bluetooth/source/BCM4350-MiniDriver-uart.hex + BCM4350-Updater.hex"
+    log_ok "Bluetooth firmware patch not installed (deliberate — see firmware/README.md)."
+    log_info "hci0 works unpatched; the kernel's \"Patch file not found\" line is expected."
 fi
 
-# --- 2d. udev rule: bring hci0 up automatically after firmware is loaded ---
+# --- 2d. udev rule: bring hci0 up automatically at boot ---
 cat > /etc/udev/rules.d/60-bluetooth-macbook.rules << 'EOF'
-# MacBook Pro BCM2E7C Bluetooth: bring hci0 up once firmware is available.
+# MacBook Pro BCM4350C0 Bluetooth: bring hci0 up once the device appears.
 # Uses systemd-run to defer the hciconfig call out of the udev context
 # (avoids the blocking-sleep antipattern; completes asynchronously after boot).
 ACTION=="add", SUBSYSTEM=="bluetooth", KERNEL=="hci0", \
@@ -662,8 +630,8 @@ log_info "  WHY: macOS sets BCM4350C0 to 3 Mbaud. Linux uses 115200 baud."
 log_info "  SMC Reset clears the chip back to factory default — needed ONCE."
 log_info ""
 log_info "  After SMC Reset, BT will work at the correct baud rate."
-log_info "  The BCM4350C0.hcd patch is installed separately (see above); its"
-log_info "  effect on A2DP quality is unverified — see firmware/README.md."
+log_info "  No firmware patch is involved: none is installed, and none would"
+log_info "  fix a baud rate mismatch — see firmware/README.md."
 log_info "═══════════════════════════════════════════════════════════"
 
 # =============================================================================
@@ -1744,11 +1712,7 @@ else
     echo -e "  ${YELLOW}[!]${NC}  0. Audio — Cirrus CS8409 driver installed, active after reboot"
 fi
 echo -e "  ${GREEN}[✔]${NC}  1. Intel GPU — VA-API hardware acceleration"
-if [ -f /lib/firmware/brcm/BCM4350C0.hcd ]; then
-    echo -e "  ${GREEN}[✔]${NC}  2. Bluetooth — config fixed + firmware installed (BCM4350C0.hcd)"
-else
-    echo -e "  ${YELLOW}[!]${NC}  2. Bluetooth — firmware missing — check firmware/bluetooth/"
-fi
+echo -e "  ${GREEN}[✔]${NC}  2. Bluetooth — bluez config, udev rule, WirePlumber (no firmware patch)"
 echo -e "  ${GREEN}[✔]${NC}  3. WiFi — macOS NVRAM (BCM4350/c2) + power save off + 5GHz preferred"
 echo -e "  ${GREEN}[✔]${NC}  4. FaceTime HD Camera — driver attempted (see warnings above)"
 echo -e "  ${GREEN}[✔]${NC}  5. Thunderbolt 3 — bolt daemon"
